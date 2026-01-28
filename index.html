@@ -1,11 +1,503 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>WordWhiz</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Word Search</title>
+  <style>
+    :root { --cell: 34px; --gap: 4px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background:#0b0f14; color:#e8eef7; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 18px; }
+    .card { background:#111826; border:1px solid #1f2a3d; border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    p { margin: 6px 0 12px; color:#b7c4d8; }
+    .row { display:flex; gap: 12px; flex-wrap: wrap; }
+    .col { flex: 1 1 320px; }
+    .inputs { display:flex; flex-direction: column; gap: 10px; }
+    input[type="text"]{
+      width: 100%; padding: 12px 12px; border-radius: 12px; border: 1px solid #27344b;
+      background:#0d1422; color:#e8eef7; outline:none;
+    }
+    input[type="text"]::placeholder{ color:#5f6f88; }
+    .btns { display:flex; gap:10px; flex-wrap: wrap; margin-top: 10px; }
+    button{
+      appearance:none; border:1px solid #2b3a55; background:#162238; color:#e8eef7;
+      padding: 10px 12px; border-radius: 12px; cursor:pointer; font-weight: 600;
+    }
+    button.primary{ background:#2a5bd7; border-color:#2a5bd7; }
+    button:disabled{ opacity:.5; cursor:not-allowed; }
+    .tiny { font-size: 12px; color:#93a6c2; }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      gap: var(--gap);
+      touch-action: none; /* important for drag on mobile */
+      user-select: none;
+      -webkit-user-select: none;
+      margin-top: 12px;
+      justify-content: start;
+    }
+    .cell {
+      width: var(--cell); height: var(--cell);
+      display:flex; align-items:center; justify-content:center;
+      border-radius: 10px;
+      background:#0d1422; border:1px solid #27344b;
+      font-weight: 800; letter-spacing: .5px;
+    }
+    .cell.sel { outline: 3px solid rgba(42,91,215,.55); background:#0f1d3a; }
+    .cell.found { background:#14351f; border-color:#1f6b35; }
+    .panelTitle { margin-top: 10px; font-weight: 700; }
+    ul { margin: 8px 0 0 18px; padding:0; }
+    li { margin: 6px 0; }
+    li.done { text-decoration: line-through; color:#7fbf93; }
+
+    .sep { height:1px; background:#1f2a3d; margin: 12px 0; }
+    .badge { display:inline-block; font-size: 12px; padding: 4px 8px; border-radius: 999px; background:#0d1422; border:1px solid #27344b; color:#b7c4d8; }
+    .msg { margin-top: 8px; color:#ffcc66; font-size: 13px; min-height: 18px; }
+  </style>
 </head>
-<body style="font-family: Arial; padding: 40px;">
-  <h1>WordWhiz is live ✅</h1>
-  <p>If you see this, hosting works.</p>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <h1>Word Search</h1>
+          <p>Create a puzzle and share it. Up to 5 words. Words are placed <span class="badge">horizontal</span> or <span class="badge">vertical</span>.</p>
+
+          <div id="createBox">
+            <div class="inputs" id="inputs"></div>
+            <div class="btns">
+              <button class="primary" id="btnCreate">Create puzzle</button>
+              <button id="btnRandom">Random letters</button>
+              <button id="btnClear">Clear</button>
+            </div>
+            <div class="tiny">Tips: use short words (max 12 chars). Spaces are removed. Only A–Z.</div>
+            <div class="msg" id="msg"></div>
+          </div>
+
+          <div class="sep"></div>
+
+          <div class="btns">
+            <button class="primary" id="btnWhatsApp" disabled>Share on WhatsApp</button>
+            <button id="btnCopy" disabled>Copy link</button>
+            <button id="btnNew">Create new</button>
+          </div>
+          <div class="tiny" id="linkOut"></div>
+
+          <div class="panelTitle">Words to find</div>
+          <ul id="wordList"></ul>
+        </div>
+
+        <div class="col">
+          <div class="panelTitle">Puzzle</div>
+          <div class="tiny">Drag across letters (mouse or touch). Only straight lines.</div>
+          <div id="grid" class="grid" aria-label="word search grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/** ---------- Utilities ---------- **/
+const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+function sanitizeWord(raw) {
+  const up = (raw || "").toUpperCase().trim();
+  // remove spaces, keep A-Z only
+  const cleaned = up.replace(/\s+/g, "").replace(/[^A-Z]/g, "");
+  return cleaned.slice(0, 12);
+}
+
+function encodeWords(words) {
+  // compact: join with commas; URL-safe enough after encodeURIComponent
+  return encodeURIComponent(words.join(","));
+}
+function decodeWords(param) {
+  try {
+    const s = decodeURIComponent(param || "");
+    if (!s) return [];
+    return s.split(",").map(sanitizeWord).filter(Boolean).slice(0,5);
+  } catch { return []; }
+}
+
+function pickRandomWord() {
+  const pool = ["LOVE", "MISSYOU", "TONIGHT", "KAMPALA", "PIZZA", "SHEILA", "LIAM", "FRIENDS", "HUGS", "BEER"];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** ---------- Generator ---------- **/
+function makeEmptyGrid(size) {
+  return Array.from({length:size}, () => Array.from({length:size}, () => ""));
+}
+
+function canPlace(grid, word, r, c, dir) {
+  const n = grid.length;
+  if (dir === "H") {
+    if (c + word.length > n) return false;
+    for (let i=0;i<word.length;i++){
+      const ch = grid[r][c+i];
+      if (ch && ch !== word[i]) return false;
+    }
+    return true;
+  } else { // V
+    if (r + word.length > n) return false;
+    for (let i=0;i<word.length;i++){
+      const ch = grid[r+i][c];
+      if (ch && ch !== word[i]) return false;
+    }
+    return true;
+  }
+}
+
+function placeWord(grid, word, r, c, dir) {
+  const coords = [];
+  if (dir === "H") {
+    for (let i=0;i<word.length;i++){ grid[r][c+i] = word[i]; coords.push([r, c+i]); }
+  } else {
+    for (let i=0;i<word.length;i++){ grid[r+i][c] = word[i]; coords.push([r+i, c]); }
+  }
+  return coords;
+}
+
+function fillRandom(grid) {
+  const n = grid.length;
+  for (let r=0;r<n;r++){
+    for (let c=0;c<n;c++){
+      if (!grid[r][c]) grid[r][c] = ALPHA[Math.floor(Math.random()*ALPHA.length)];
+    }
+  }
+}
+
+function generatePuzzle(words) {
+  // size: at least longest+2, min 10, max 16 for MVP simplicity
+  const longest = words.reduce((m,w)=>Math.max(m,w.length), 0);
+  let size = clamp(longest + 2, 10, 16);
+
+  // Try a few restarts
+  for (let attempt=0; attempt<40; attempt++){
+    let grid = makeEmptyGrid(size);
+    let placements = {}; // word -> coords
+    let ok = true;
+
+    // Place longer words first
+    const sorted = [...words].sort((a,b)=>b.length-a.length);
+
+    for (const w of sorted){
+      let placed = false;
+      for (let tries=0; tries<200; tries++){
+        const dir = Math.random() < 0.5 ? "H" : "V";
+        const r = Math.floor(Math.random() * size);
+        const c = Math.floor(Math.random() * size);
+        if (canPlace(grid, w, r, c, dir)){
+          placements[w] = placeWord(grid, w, r, c, dir);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed){ ok = false; break; }
+    }
+
+    if (ok){
+      fillRandom(grid);
+      return { grid, placements, size };
+    }
+
+    // If we failed repeatedly, sometimes enlarging helps.
+    if (attempt === 20 && size < 16) size++;
+  }
+
+  // Final fallback: make a grid and just fill (shouldn't happen with short words)
+  const grid = makeEmptyGrid(size);
+  fillRandom(grid);
+  return { grid, placements: {}, size };
+}
+
+/** ---------- UI State ---------- **/
+let state = {
+  words: [],
+  grid: [],
+  size: 0,
+  placements: {},      // word -> coords
+  found: new Set(),    // found words
+  selecting: false,
+  startCell: null,
+  currentPath: [],
+};
+
+const elInputs = document.getElementById("inputs");
+const elGrid = document.getElementById("grid");
+const elWordList = document.getElementById("wordList");
+const elMsg = document.getElementById("msg");
+const elLinkOut = document.getElementById("linkOut");
+
+const btnCreate = document.getElementById("btnCreate");
+const btnRandom = document.getElementById("btnRandom");
+const btnClear = document.getElementById("btnClear");
+const btnWhatsApp = document.getElementById("btnWhatsApp");
+const btnCopy = document.getElementById("btnCopy");
+const btnNew = document.getElementById("btnNew");
+
+function setMessage(s) { elMsg.textContent = s || ""; }
+
+function buildInputs() {
+  elInputs.innerHTML = "";
+  for (let i=0;i<5;i++){
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.maxLength = 20;
+    inp.placeholder = `Word ${i+1} (e.g., LOVE)`;
+    inp.dataset.idx = String(i);
+    elInputs.appendChild(inp);
+  }
+}
+
+function readInputs() {
+  const ins = [...elInputs.querySelectorAll("input")];
+  const words = ins.map(i => sanitizeWord(i.value)).filter(Boolean);
+  // unique, max 5
+  return [...new Set(words)].slice(0,5);
+}
+
+function renderWordList() {
+  elWordList.innerHTML = "";
+  for (const w of state.words){
+    const li = document.createElement("li");
+    li.textContent = w;
+    if (state.found.has(w)) li.classList.add("done");
+    elWordList.appendChild(li);
+  }
+}
+
+function renderGrid() {
+  elGrid.style.gridTemplateColumns = `repeat(${state.size}, var(--cell))`;
+  elGrid.innerHTML = "";
+
+  for (let r=0;r<state.size;r++){
+    for (let c=0;c<state.size;c++){
+      const d = document.createElement("div");
+      d.className = "cell";
+      d.textContent = state.grid[r][c];
+      d.dataset.r = String(r);
+      d.dataset.c = String(c);
+      elGrid.appendChild(d);
+    }
+  }
+  paintFound();
+}
+
+function coordsKey(r,c){ return `${r},${c}`; }
+
+function paintFound() {
+  const cells = [...elGrid.querySelectorAll(".cell")];
+  for (const cell of cells) cell.classList.remove("found");
+
+  // mark all coords for found words
+  for (const w of state.found){
+    const coords = state.placements[w] || [];
+    for (const [r,c] of coords){
+      const idx = r * state.size + c;
+      const cell = cells[idx];
+      if (cell) cell.classList.add("found");
+    }
+  }
+}
+
+function clearSelectionPaint() {
+  for (const cell of elGrid.querySelectorAll(".cell.sel")) cell.classList.remove("sel");
+}
+function paintSelection(path) {
+  clearSelectionPaint();
+  const cells = [...elGrid.querySelectorAll(".cell")];
+  for (const [r,c] of path){
+    const idx = r * state.size + c;
+    const cell = cells[idx];
+    if (cell) cell.classList.add("sel");
+  }
+}
+
+function getCellFromEvent(e) {
+  const target = e.target.closest(".cell");
+  if (!target) return null;
+  const r = Number(target.dataset.r);
+  const c = Number(target.dataset.c);
+  if (Number.isNaN(r) || Number.isNaN(c)) return null;
+  return { r, c };
+}
+
+function buildPath(a, b) {
+  // only horizontal or vertical
+  if (!a || !b) return [];
+  const path = [];
+  if (a.r === b.r) {
+    const step = a.c <= b.c ? 1 : -1;
+    for (let c=a.c; c !== b.c + step; c += step) path.push([a.r, c]);
+  } else if (a.c === b.c) {
+    const step = a.r <= b.r ? 1 : -1;
+    for (let r=a.r; r !== b.r + step; r += step) path.push([r, a.c]);
+  }
+  return path;
+}
+
+function pathToString(path) {
+  return path.map(([r,c]) => state.grid[r][c]).join("");
+}
+
+function tryCommitSelection(path) {
+  if (!path.length) return;
+  const s = pathToString(path);
+
+  // Accept either direction (forward/back)
+  const rev = s.split("").reverse().join("");
+  const hit = state.words.find(w => w === s || w === rev);
+
+  if (hit && !state.found.has(hit)) {
+    state.found.add(hit);
+    renderWordList();
+    paintFound();
+    if (state.found.size === state.words.length) setMessage("✅ All words found!");
+    else setMessage(`✅ Found: ${hit}`);
+  } else {
+    setMessage("");
+  }
+}
+
+/** ---------- Share Link ---------- **/
+function updateShareLink() {
+  const base = location.origin + location.pathname;
+  const encoded = encodeWords(state.words);
+  const url = `${base}#w=${encoded}`;
+  elLinkOut.textContent = url;
+
+  btnWhatsApp.disabled = state.words.length === 0;
+  btnCopy.disabled = state.words.length === 0;
+
+  btnWhatsApp.onclick = () => {
+    const text = `Try my word search! ${url}`;
+    const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(wa, "_blank");
+  };
+
+  btnCopy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage("📋 Link copied!");
+    } catch {
+      // fallback
+      prompt("Copy this link:", url);
+    }
+  };
+}
+
+/** ---------- Create / Load ---------- **/
+function createFromWords(words) {
+  if (!words.length) {
+    setMessage("Please enter at least 1 word.");
+    return;
+  }
+
+  const { grid, placements, size } = generatePuzzle(words);
+
+  state.words = words;
+  state.grid = grid;
+  state.size = size;
+  state.placements = placements;
+  state.found = new Set();
+
+  renderWordList();
+  renderGrid();
+  updateShareLink();
+  setMessage("");
+}
+
+function loadFromHash() {
+  const hash = location.hash || "";
+  const m = hash.match(/w=([^&]+)/);
+  const words = m ? decodeWords(m[1]) : [];
+  if (words.length) {
+    // hide create box? keep it visible but prefill
+    const ins = [...elInputs.querySelectorAll("input")];
+    ins.forEach((inp, i) => inp.value = words[i] || "");
+    createFromWords(words);
+  } else {
+    // fresh
+    state.words = [];
+    state.found = new Set();
+    elWordList.innerHTML = "";
+    elGrid.innerHTML = "";
+    elLinkOut.textContent = "";
+    btnWhatsApp.disabled = true;
+    btnCopy.disabled = true;
+  }
+}
+
+/** ---------- Events (drag select) ---------- **/
+function pointerDown(e) {
+  const cell = getCellFromEvent(e);
+  if (!cell) return;
+  state.selecting = true;
+  state.startCell = cell;
+  state.currentPath = [[cell.r, cell.c]];
+  paintSelection(state.currentPath);
+  e.preventDefault();
+}
+function pointerMove(e) {
+  if (!state.selecting) return;
+  const cell = getCellFromEvent(e);
+  if (!cell) return;
+
+  const path = buildPath(state.startCell, cell);
+  if (path.length) {
+    state.currentPath = path;
+    paintSelection(path);
+  }
+  e.preventDefault();
+}
+function pointerUp(e) {
+  if (!state.selecting) return;
+  state.selecting = false;
+  tryCommitSelection(state.currentPath);
+  clearSelectionPaint();
+  state.startCell = null;
+  state.currentPath = [];
+  e.preventDefault();
+}
+
+/** ---------- Buttons ---------- **/
+btnCreate.onclick = () => {
+  const words = readInputs();
+  createFromWords(words);
+  // write hash so share link matches current state
+  location.hash = `w=${encodeWords(words)}`;
+};
+
+btnRandom.onclick = () => {
+  const ins = [...elInputs.querySelectorAll("input")];
+  ins.forEach((inp) => inp.value = pickRandomWord());
+};
+
+btnClear.onclick = () => {
+  const ins = [...elInputs.querySelectorAll("input")];
+  ins.forEach((inp) => inp.value = "");
+  setMessage("");
+};
+
+btnNew.onclick = () => {
+  location.hash = "";
+  const ins = [...elInputs.querySelectorAll("input")];
+  ins.forEach((inp) => inp.value = "");
+  loadFromHash();
+  setMessage("");
+};
+
+/** ---------- Init ---------- **/
+buildInputs();
+elGrid.addEventListener("pointerdown", pointerDown);
+elGrid.addEventListener("pointermove", pointerMove);
+window.addEventListener("pointerup", pointerUp);
+window.addEventListener("hashchange", loadFromHash);
+loadFromHash();
+</script>
 </body>
 </html>
